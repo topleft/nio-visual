@@ -1,24 +1,36 @@
 var nio = require('niojs');
 var d3 = require('d3');
 
-var prev;
-var diffs = [];
+var prevAvg;
+var currentAvg;
+var counts = [];
+var sampleSize = 3;
+colors = {high: '#567238', middle: '#37A28A', low: '#76C6EB'}
+
+// add [sampleSize] data chunks and then compare
 
 nio.source.socketio(
   'http://brand.nioinstances.com',
   ['count_by_time']
-  ).pipe(nio.func(calcDifferenceInSeconds))
-  .pipe(nio.func(function(diff){
-    diffs.push(diff);
+  ).pipe(nio.func(function (chunk) {
+    if (chunk.count_type === 'countpersec') {
+      counts.push(chunk.count_value);
+    }
   }));
  
 
 setInterval(function() {
-  var color = determineColor(averageDiff(diffs, 2));
+  if (counts.length > sampleSize) {
+    var color = runColorPicker();
+  } else {
+    var color = '#bbb';
+  }
   d3.select("circle")
-      .style("fill", d3.hcl(color))
     .transition()
-      .duration(1200)
+      .duration(800)
+        .style("fill", d3.hcl(color))
+    .transition()
+      .duration(2200)
       .style("fill", function() {
         var that = d3.select(this),
             fill0 = that.style("fill"),
@@ -26,45 +38,50 @@ setInterval(function() {
         that.style("fill", fill0);
         return fill1;
       });
-}, 2000);  
+}, 3000);  
 
-function averageDiff (diffs, size) {
-  var copy = diffs;
-  var l = copy.length;
-  if (copy.length >= size) {
-    var total = copy.reduce(function(prev, curr){
-      return prev + curr;
-    });
-    diffs.splice(0, l);
-    var avg = Math.round(total/l);
-    console.log("Avg",avg)
-    console.log("Diffs",diffs)
-    return avg;
-  }
+
+function runColorPicker () {
+  averagePerSecCount(counts, sampleSize);
+  var diff = calcDifference();
+  var color = determineColor(diff, colors);
+  return color;
 }
 
 
-function determineColor (diff) {
-  if (diff > 20) {
-    return '#567238'
-  } else if (diff > 2) {
-    return '#488B5C'
-  } else if (diff < -2) {
-    return '#3FB6BC'
-  } else if (diff < -20) {
-    return '#76C6EB'
-  } else {
-    return '#37A28A'
+function averagePerSecCount (counts, sampleSize) {
+  var l = counts.length || 0;
+  if (l >= sampleSize) {
+    var sample = counts.slice(0, sampleSize);
+    var total = sample.reduce(function(prev, curr){
+      return prev + curr;
+    });
+    counts.splice(0, sampleSize);
+    var avg = Math.round(total/sampleSize);
+    currentAvg = avg;
   }
 };
 
 
-function calcDifferenceInSeconds (chunk) {
-  if (chunk.count_type === 'countpersec') {
-      if ( !prev ) { prev = chunk };
-      var diff = prev.count_value - chunk.count_value;
-      return Math.round(diff);
-    }
+function determineColor (diff, colors) {
+  if (diff > 5) {
+    return colors.high;
+  } else if (diff < -5) {
+    return colors.low;
+  } else {
+    return colors.middle;
+  }
+};
+
+
+function calcDifference () {
+  if ( !prevAvg ) { 
+    prevAvg = currentAvg;
+    return;
+  }
+  var diff = prevAvg - currentAvg;
+  prevAvg = currentAvg;
+  return Math.round(diff);
 }
 
 
